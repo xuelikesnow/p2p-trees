@@ -54,7 +54,7 @@ async function onSubmit() {
       <input
         v-model="species"
         type="text"
-        placeholder="pine / magnolia / the one outside my house / whatever grows outside"
+        placeholder="pine, magnolia, the one outside my house, whatever grows outside"
         maxlength="100"
         required
         autocomplete="off"
@@ -176,7 +176,7 @@ textarea::placeholder {
   color: var(--ink-ink);
   opacity: 0.35;
   font-style: italic;
-  font-size: 14px;
+  font-size: 12px;
 }
 input:focus,
 textarea:focus {
