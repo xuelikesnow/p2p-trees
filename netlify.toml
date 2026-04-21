@@ -1,0 +1,11 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# SPA fallback: vue-router uses HTML5 history mode, so deep links like
+# /plant must be rewritten to /index.html on the host, otherwise a hard
+# refresh on that URL returns 404.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

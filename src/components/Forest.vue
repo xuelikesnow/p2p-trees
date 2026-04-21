@@ -1,6 +1,14 @@
 <script setup>
 import { ref, nextTick, onMounted, onBeforeUnmount, watch, computed, shallowRef } from 'vue'
-import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from 'd3-force'
+import {
+  forceSimulation,
+  forceLink,
+  forceManyBody,
+  forceCenter,
+  forceCollide,
+  forceX,
+  forceY,
+} from 'd3-force'
 import ResponseNode from './ResponseNode.vue'
 import { subscribe } from '../lib/storage.js'
 import { computeLinks } from '../lib/connections.js'
@@ -19,6 +27,10 @@ const nodes = shallowRef([])
 const links = shallowRef([])
 const tick = ref(0)
 const svgRef = ref(null)
+// True until the first storage callback fires. With the Supabase backend
+// that happens after the initial network fetch; with localStorage it flips
+// synchronously on mount. Drives the themed loading animation.
+const loading = ref(true)
 
 // Outer bounds of the foreignObject each node is rendered into. Must be
 // large enough to contain the longest responses; collision is computed from
@@ -27,6 +39,79 @@ const NODE_BOX_W = 340
 const NODE_BOX_H = 200
 
 let simulation = null
+
+// Custom d3-force: push each node away from any edge it isn't an endpoint of.
+// d3-force's built-in forceCollide handles node↔node overlap but can't see
+// edges, so without this, unrelated responses can drift directly on top of a
+// root line and visually "cross" another pair's connection.
+//
+// For each (node, edge) pair we compute the node's nearest-point distance to
+// the straight segment A→B (our curves are a fairly gentle quadratic wobble
+// on that segment — a straight-line approximation keeps the math O(N*E) and
+// fast, and any residual overlap from the curve itself is small). If the
+// node is within (radius + margin), we shove it perpendicular to the edge,
+// away from it.
+function makeEdgeAvoidForce({ margin = 18, strength = 0.7 } = {}) {
+  let ns = []
+  function force(alpha) {
+    const ls = links.value
+    if (!ls || ls.length === 0 || ns.length === 0) return
+    for (let li = 0; li < ls.length; li++) {
+      const link = ls[li]
+      const a = link.source
+      const b = link.target
+      // d3-force replaces id strings with node objects after the first tick;
+      // before that, skip.
+      if (typeof a !== 'object' || typeof b !== 'object') continue
+      const ax = a.x ?? 0
+      const ay = a.y ?? 0
+      const ex = (b.x ?? 0) - ax
+      const ey = (b.y ?? 0) - ay
+      const len2 = ex * ex + ey * ey
+      if (len2 < 1) continue
+      for (let ni = 0; ni < ns.length; ni++) {
+        const n = ns[ni]
+        if (n === a || n === b) continue
+        if (n.fx != null || n.fy != null) continue
+        const r = (n._radius ?? 80) + margin
+        // Parameter t of the closest point on segment AB to node n, clamped
+        // to [0, 1] so the closest point lives inside the segment and not
+        // out past its endpoints.
+        const nx = (n.x ?? 0) - ax
+        const ny = (n.y ?? 0) - ay
+        let t = (nx * ex + ny * ey) / len2
+        if (t < 0) t = 0
+        else if (t > 1) t = 1
+        const cx = ax + t * ex
+        const cy = ay + t * ey
+        const dx = (n.x ?? 0) - cx
+        const dy = (n.y ?? 0) - cy
+        const d2 = dx * dx + dy * dy
+        if (d2 >= r * r) continue
+        let d = Math.sqrt(d2)
+        let ux, uy
+        if (d < 0.01) {
+          // Node sits essentially on the edge — push it perpendicular to AB
+          // in a deterministic direction (the edge's left-hand normal).
+          const invLen = 1 / Math.sqrt(len2)
+          ux = -ey * invLen
+          uy = ex * invLen
+          d = 0.01
+        } else {
+          ux = dx / d
+          uy = dy / d
+        }
+        const push = (r - d) * strength * alpha
+        n.vx += ux * push
+        n.vy += uy * push
+      }
+    }
+  }
+  force.initialize = (_ns) => {
+    ns = _ns
+  }
+  return force
+}
 
 // Rough-estimate a starting radius from text length before the DOM has had
 // a chance to render. measureNodes() refines this with real bounding boxes
@@ -108,6 +193,11 @@ onMounted(() => {
     )
     .force('charge', forceManyBody().strength(-500))
     .force('center', forceCenter(0, 0))
+    // Gentle gravity toward the origin on both axes. Unlike `forceCenter`
+    // (which only shifts the mean), these pull each individual node back
+    // so disconnected responses don't drift off to the periphery.
+    .force('x', forceX(0).strength(0.08))
+    .force('y', forceY(0).strength(0.08))
     // Per-node radius driven by measured content size; strength 1 for hard
     // non-overlap (nodes will push each other apart rather than gently repel).
     .force(
@@ -117,12 +207,35 @@ onMounted(() => {
         .strength(1)
         .iterations(3),
     )
+    // Keep nodes off of edges they aren't endpoints of, so roots don't
+    // thread visibly under unrelated responses.
+    .force('edgeAvoid', makeEdgeAvoidForce({ margin: 18, strength: 0.7 }))
     .alphaDecay(0.025)
+    // Keep the simulation lightly simmering forever instead of decaying to
+    // zero. Combined with the velocity noise below, nodes breathe/drift
+    // organically rather than freezing at a static equilibrium.
+    .alphaTarget(0.02)
+    .alphaMin(0.001)
+    .velocityDecay(0.55)
     .on('tick', () => {
+      // Tiny Brownian-style nudge per tick. Skip nodes that are fixed
+      // (fx/fy set) so future drag interactions will pin correctly. The
+      // gravity + collision forces above bound how far any one nudge can
+      // carry a node, so the whole forest wanders gently without escaping.
+      const ns = nodes.value
+      for (let i = 0; i < ns.length; i++) {
+        const n = ns[i]
+        if (n.fx != null || n.fy != null) continue
+        n.vx = (n.vx || 0) + (Math.random() - 0.5) * 0.12
+        n.vy = (n.vy || 0) + (Math.random() - 0.5) * 0.12
+      }
       tick.value++
     })
 
-  const unsubscribe = subscribe((responses) => rebuildGraph(responses))
+  const unsubscribe = subscribe((responses) => {
+    loading.value = false
+    rebuildGraph(responses)
+  })
 
   // Re-measure once web fonts finish loading — initial measurements taken
   // before Typekit resolves will be slightly off, and font-load can shift
@@ -225,12 +338,13 @@ function linkPath(link) {
 // a stable hash of the link endpoints, so each root keeps the same color
 // across renders but the forest reads as polychromatic. Species-links stay
 // green as the "living" backbone of the network.
-const WORD_INK_VARS = ['--ink-red', '--ink-pink', '--ink-orange']
+// const WORD_INK_VARS = ['--ink-red', '--ink-pink', '--ink-orange']
 
 function linkStroke(link) {
-  if (link.kind === 'species') return 'var(--ink-green)'
-  const h = Math.abs(hashPair(link.source.id ?? link.source, link.target.id ?? link.target))
-  return `var(${WORD_INK_VARS[h % WORD_INK_VARS.length]})`
+  return 'var(--ink-edge)'
+  // if (link.kind === 'species') return 'var(--ink-green)'
+  // const h = Math.abs(hashPair(link.source.id ?? link.source, link.target.id ?? link.target))
+  // return `var(${WORD_INK_VARS[h % WORD_INK_VARS.length]})`
 }
 
 // Expose tick in template via _tickDep so reactive template recalculates on each frame.
@@ -241,6 +355,10 @@ const _tickDep = computed(() => tick.value)
 </script>
 
 <template>
+  <!-- Pinned title. Painted over the forest with multiply so nodes and
+         roots behind it still show through. Non-interactive so drag-to-pan
+         passes through. -->
+
   <div class="forest-wrap">
     <svg
       ref="svgRef"
@@ -302,7 +420,31 @@ const _tickDep = computed(() => tick.value)
       <span class="hint">drag to pan * scroll to zoom</span>
     </div>
 
-    <p v-if="nodes.length === 0" class="empty-state">
+    <div v-if="loading" class="loading-state" aria-live="polite">
+      <svg
+        class="loading-sprout"
+        viewBox="0 0 40 52"
+        fill="none"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <!-- Stem drawing in from the ground up -->
+        <path class="sprout-stem" d="M20 50 C 20 40 20 32 20 22" stroke-width="1.6" />
+        <!-- Two leaves unfurling on either side of the stem -->
+        <path class="sprout-leaf sprout-leaf--left" d="M20 30 C 12 28 8 22 10 16" stroke-width="1.4" />
+        <path class="sprout-leaf sprout-leaf--right" d="M20 26 C 28 24 32 18 30 12" stroke-width="1.4" />
+      </svg>
+      <p class="loading-text">
+        listening for the forest<span class="dot">.</span><span class="dot">.</span><span
+          class="dot"
+          >.</span
+        >
+      </p>
+    </div>
+
+    <p v-else-if="nodes.length === 0" class="empty-state">
       the forest is empty.<br />
       plant the first tree.
     </p>
@@ -315,6 +457,12 @@ const _tickDep = computed(() => tick.value)
   width: 100%;
   height: 100%;
   overflow: hidden;
+  /* Dragging to pan should never start a text selection across the nodes.
+     Also suppress the iOS/Android long-press callout / tap highlight. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .forest {
@@ -323,10 +471,10 @@ const _tickDep = computed(() => tick.value)
   height: 100%;
   cursor: grab;
   background:
-    radial-gradient(circle at 25% 18%, rgba(112, 192, 127, 0.1), transparent 60%),
-    radial-gradient(circle at 78% 30%, rgba(241, 118, 163, 0.07), transparent 55%),
-    radial-gradient(circle at 60% 85%, rgba(248, 158, 110, 0.08), transparent 55%),
-    radial-gradient(circle at 15% 78%, rgba(226, 74, 57, 0.05), transparent 55%);
+    radial-gradient(circle at 25% 18%, rgba(112, 192, 127, 0.2), transparent 55%),
+    radial-gradient(circle at 78% 30%, rgba(241, 118, 163, 0.2), transparent 55%),
+    radial-gradient(circle at 60% 85%, rgba(248, 158, 110, 0.2), transparent 55%),
+    radial-gradient(circle at 15% 78%, rgba(226, 74, 57, 0.2), transparent 55%);
   touch-action: none;
 }
 .forest.panning {
@@ -345,8 +493,8 @@ const _tickDep = computed(() => tick.value)
   stroke-dasharray: none;
 }
 .root--word {
-  stroke-width: 1.2;
-  stroke-dasharray: 2 4;
+  stroke-width: 2.4;
+  stroke-dasharray: 4 4 1 4;
 }
 
 .node-slot {
@@ -388,6 +536,20 @@ const _tickDep = computed(() => tick.value)
   color: var(--paper);
 }
 
+/* On narrow viewports, the hint ("drag to pan * scroll to zoom") collides
+   with the colophon in the opposite corner. The wording is also misleading
+   on touch devices — so we just drop it below 640px and keep only the
+   recenter button, which is the only actionable control anyway. */
+@media (max-width: 640px) {
+  .forest-controls {
+    gap: 8px;
+    font-size: 10px;
+  }
+  .forest-controls .hint {
+    display: none;
+  }
+}
+
 .empty-state {
   position: absolute;
   inset: 0;
@@ -401,5 +563,89 @@ const _tickDep = computed(() => tick.value)
   color: var(--ink-green);
   opacity: 0.55;
   mix-blend-mode: multiply;
+}
+
+/* --- loading state --------------------------------------------------------
+   A small sprouting-seedling SVG with an ellipsis that pulses, echoing the
+   "planting" metaphor. The stem and leaves draw themselves in using CSS
+   dash animations, then the whole thing loops softly. */
+.loading-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  text-align: center;
+  color: var(--ink-green);
+  opacity: 0.7;
+  mix-blend-mode: multiply;
+}
+.loading-sprout {
+  width: clamp(36px, 6vw, 56px);
+  height: auto;
+  color: var(--ink-green);
+}
+.loading-sprout .sprout-stem,
+.loading-sprout .sprout-leaf {
+  stroke-dasharray: 60;
+  stroke-dashoffset: 60;
+  animation: sprout-grow 2.4s ease-in-out infinite;
+}
+.loading-sprout .sprout-leaf--left {
+  animation-delay: 0.6s;
+}
+.loading-sprout .sprout-leaf--right {
+  animation-delay: 1s;
+}
+@keyframes sprout-grow {
+  0% {
+    stroke-dashoffset: 60;
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  60%,
+  80% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+.loading-text {
+  margin: 0;
+  font-family: var(--serif-display);
+  font-size: clamp(1rem, 1.8vw, 1.4rem);
+  font-style: italic;
+}
+.loading-text .dot {
+  display: inline-block;
+  opacity: 0;
+  animation: loading-dot 1.5s ease-in-out infinite;
+}
+.loading-text .dot:nth-child(1) {
+  animation-delay: 0s;
+}
+.loading-text .dot:nth-child(2) {
+  animation-delay: 0.25s;
+}
+.loading-text .dot:nth-child(3) {
+  animation-delay: 0.5s;
+}
+@keyframes loading-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
 }
 </style>

@@ -3,7 +3,7 @@ import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
 import SubmissionForm from './SubmissionForm.vue'
 
 const props = defineProps({
-  open: { type: Boolean, default: false }
+  open: { type: Boolean, default: false },
 })
 const emit = defineEmits(['close'])
 
@@ -27,7 +27,7 @@ watch(
         panelRef.value?.querySelector('input, textarea, button')?.focus()
       })
     }
-  }
+  },
 )
 
 function handleSubmitted(response) {
@@ -64,12 +64,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
       aria-modal="true"
       aria-label="Plant a tree"
     >
-      <button
-        class="close"
-        type="button"
-        aria-label="Close"
-        @click="handleClose"
-      >
+      <button class="close" type="button" aria-label="Close" @click="handleClose">
         <span aria-hidden="true">×</span>
       </button>
 
@@ -85,24 +80,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
             <br />
             <span class="why">“{{ planted.why }}”</span>
             <br />
-            <span
-              v-if="planted.name && planted.name !== 'anonymous'"
-              class="byline"
-            >
+            <span v-if="planted.name && planted.name !== 'anonymous'" class="byline">
               — {{ planted.name }}
             </span>
           </p>
           <div class="confirm-actions">
-            <button class="cta" type="button" @click="handleClose">
-              see the forest →
-            </button>
-            <button
-              class="secondary"
-              type="button"
-              @click="planted = null"
-            >
-              plant another
-            </button>
+            <button class="cta" type="button" @click="handleClose">see the forest →</button>
+            <button class="secondary" type="button" @click="planted = null">plant another</button>
           </div>
         </div>
       </div>
@@ -157,7 +141,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
   cursor: pointer;
   display: grid;
   place-items: center;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 .close:hover {
   background: var(--ink-ink);
@@ -219,7 +205,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
   text-transform: lowercase;
   padding: 10px 20px;
   background: var(--ink-red);
-  color: var(--paper);
+  color: white;
   border: none;
   cursor: pointer;
   transform: rotate(-1.2deg);

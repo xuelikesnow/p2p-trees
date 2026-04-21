@@ -8,7 +8,7 @@
 // visualization can draw them differently (thicker roots for species
 // matches, thin hyphae for word matches).
 
-import { extractSpecies, meaningfulWords } from './text.js'
+import { extractSpecies, learnSpecies, meaningfulWords } from './text.js'
 
 // How many shared-word links to allow per response before we stop adding
 // more. Prevents hub-and-spoke dominance when one response is long.
@@ -21,6 +21,11 @@ export function enrichResponse(response) {
 }
 
 export function computeLinks(responses) {
+  // Seed the learned-species vocabulary from every observed response before
+  // extracting species. Important in shared-backend mode: a visitor who has
+  // never submitted "mother tree" themselves still needs to know it counts
+  // as a species so connections form correctly on their client.
+  for (const r of responses) learnSpecies(r.species)
   const enriched = responses.map(enrichResponse)
   const links = []
   const wordLinkCount = new Map()

@@ -50,12 +50,12 @@ async function onSubmit() {
     </h2>
 
     <label class="field">
-      <span class="label">species</span>
+      <span class="label">tree</span>
       <input
         v-model="species"
         type="text"
-        placeholder="pine / magnolia / whatever grows outside"
-        maxlength="80"
+        placeholder="pine / magnolia / the one outside my house / whatever grows outside"
+        maxlength="100"
         required
         autocomplete="off"
       />
@@ -78,7 +78,7 @@ async function onSubmit() {
       <input
         v-model="name"
         type="text"
-        placeholder="initials or anonymous"
+        placeholder="leave blank to stay anonymous"
         maxlength="60"
         autocomplete="off"
       />
@@ -176,6 +176,7 @@ textarea::placeholder {
   color: var(--ink-ink);
   opacity: 0.35;
   font-style: italic;
+  font-size: 14px;
 }
 input:focus,
 textarea:focus {
@@ -217,7 +218,7 @@ textarea:focus {
   text-transform: lowercase;
   padding: 10px 22px;
   background: var(--ink-red);
-  color: var(--paper);
+  color: white;
   border: none;
   cursor: pointer;
   transform: rotate(-1.5deg);

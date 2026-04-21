@@ -1,94 +1,49 @@
-// Storage abstraction for responses.
+// Storage facade. Picks an implementation at build time based on env vars:
 //
-// Default implementation: localStorage (single-browser, zero config).
-// To share the forest across visitors for the exhibition, swap the
-// implementation at the bottom of this file — see ./supabase.js for a
-// drop-in replacement using Supabase Postgres + realtime.
+//   - If VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY are set, use the
+//     Supabase-backed store (shared forest across every visitor).
+//   - Otherwise, fall back to the localStorage-backed store
+//     (single-browser, kiosk / dev mode).
 //
-// The contract any implementation must satisfy:
-//   list()          -> Promise<Response[]>
-//   add(input)      -> Promise<Response>
-//   subscribe(cb)   -> () => void   (cb called with the full list on changes)
+// Downstream imports stay the same (`import { list, add, subscribe } from
+// './lib/storage.js'`); the implementation switches via environment only.
 
-import { reactive, readonly } from 'vue'
+// Accept either key-name convention so you can copy-paste whichever your
+// Supabase dashboard is showing you:
+//   - VITE_SUPABASE_PUBLISHABLE_KEY  (new: sb_publishable_...)
+//   - VITE_SUPABASE_ANON_KEY         (legacy: long JWT)
+// Both are "low-privilege, safe to expose on the web" and behave identically
+// for this app's read/insert needs.
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+const supabaseKey =
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+const useSupabase = Boolean(supabaseUrl && supabaseKey)
 
-const STORAGE_KEY = 'p2p-trees/responses/v1'
+// Using static imports of both files would bundle both code paths; we use
+// top-level await on a dynamic import so the unused backend is tree-shaken.
+const impl = await (useSupabase
+  ? import('./storage-supabase.js')
+  : import('./storage-local.js'))
 
-const state = reactive({ responses: [], loaded: false })
-const subscribers = new Set()
+export const list = impl.list
+export const add = impl.add
+export const subscribe = impl.subscribe
+export const responsesRef = impl.responsesRef
+export const resetForest = impl.resetForest
 
-function readFromStorage() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function writeToStorage(responses) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(responses))
-  } catch {
-    // Quota exceeded or disabled — silently ignore; session-only mode.
-  }
-}
-
-function notify() {
-  for (const cb of subscribers) cb(state.responses)
-}
-
-// Cross-tab sync so multiple windows on the same machine stay in step.
 if (typeof window !== 'undefined') {
-  window.addEventListener('storage', (e) => {
-    if (e.key !== STORAGE_KEY) return
-    state.responses = readFromStorage()
-    notify()
-  })
-}
+  // Which backend are we on? Handy for sanity-checks before the opening.
+  // Open devtools → console → `__storageMode` should print 'supabase' in prod.
+  window.__storageMode = useSupabase ? 'supabase' : 'local'
 
-function ensureLoaded() {
-  if (state.loaded) return
-  state.responses = readFromStorage()
-  state.loaded = true
-}
+  // Admin: wipe every submission. Call from the browser console:
+  //   await window.__resetForest()
+  // On the Supabase backend this requires the "delete any" RLS policy.
+  window.__resetForest = () => impl.resetForest()
 
-export async function list() {
-  ensureLoaded()
-  return state.responses
-}
-
-export async function add({ name, species, why }) {
-  ensureLoaded()
-  const response = {
-    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-    name: (name ?? '').trim().slice(0, 60) || 'anonymous',
-    species: (species ?? '').trim().slice(0, 80),
-    why: (why ?? '').trim().slice(0, 600),
-    createdAt: Date.now(),
-  }
-  state.responses = [...state.responses, response]
-  writeToStorage(state.responses)
-  notify()
-  return response
-}
-
-export function subscribe(cb) {
-  ensureLoaded()
-  subscribers.add(cb)
-  cb(state.responses)
-  return () => subscribers.delete(cb)
-}
-
-// Read-only reactive handle for components that want to render directly
-// from the store without managing a subscription themselves.
-export const responsesRef = readonly(state)
-
-// Dev convenience: seed a handful of example responses if the store is empty.
-// Call from the browser console: `window.__seedForest()`.
-if (typeof window !== 'undefined') {
+  // Dev convenience: seed a handful of example responses if the store is
+  // empty. Call from the browser console: `await window.__seedForest()`.
   window.__seedForest = async () => {
     const samples = [
       {
@@ -142,7 +97,7 @@ if (typeof window !== 'undefined') {
         why: "If I were a tree, I would be an Eucalyptus tree! I noticed them for the first time in a line, atop a mountain, in the distance. I hope I could embody a tree that exudes a sense of earth's beauty and share that with those atop the world.",
       },
     ]
-    for (const s of samples) await add(s)
+    for (const s of samples) await impl.add(s)
     console.log('seeded', samples.length, 'responses')
   }
 }

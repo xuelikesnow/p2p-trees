@@ -13,13 +13,15 @@
 
 :root {
   --paper: #fff9e6;
-  --paper-deep: #ffead8f8;
+  --paper-deep: #fff9e6;
 
   --ink-ink: #2d4a3e;
   --ink-orange: #f89e6e;
   --ink-red: #f58b89;
   --ink-pink: #f176a3;
   --ink-green: #70c07f;
+  --ink-blue: #4e71c2;
+  --ink-edge: #94daef;
 
   /* Typography roles.
    *   --display-heavy → page titles and all sans-serif/display bold text
@@ -89,14 +91,17 @@ button {
   scrollbar-width: thin;
   scrollbar-color: var(--ink-green) transparent;
 }
+
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
+
 *::-webkit-scrollbar-thumb {
   background: var(--ink-green);
   opacity: 0.4;
 }
+
 *::-webkit-scrollbar-track {
   background: transparent;
 }

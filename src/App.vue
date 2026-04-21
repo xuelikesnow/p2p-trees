@@ -148,7 +148,6 @@ onBeforeUnmount(() => {
 }
 
 /* --- title (top-left) ---------------------------------------------------- */
-
 .chrome--title {
   top: clamp(14px, 2.5vh, 28px);
   left: clamp(16px, 3vw, 40px);
@@ -161,10 +160,10 @@ onBeforeUnmount(() => {
   line-height: 0.85;
   display: flex;
   flex-direction: column;
-  mix-blend-mode: multiply;
   color: var(--ink-pink);
   font-size: clamp(1.5rem, min(4.5vw, 7vh), 3.25rem);
   user-select: none;
+  opacity: 0.9;
 }
 .title-line {
   display: inline-block;
@@ -294,6 +293,15 @@ onBeforeUnmount(() => {
 }
 .sep {
   opacity: 0.7;
+}
+
+/* On narrow viewports the colophon sits close to the forest controls in the
+   opposite corner. Shrink it and tighten spacing so both fit comfortably. */
+@media (max-width: 640px) {
+  .chrome--colophon {
+    font-size: 9px;
+    letter-spacing: 0.14em;
+  }
 }
 
 /* --- transitions --------------------------------------------------------- */
