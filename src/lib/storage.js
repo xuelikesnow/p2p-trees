@@ -16,15 +16,12 @@
 // for this app's read/insert needs.
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseKey =
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-  import.meta.env.VITE_SUPABASE_ANON_KEY
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_ANON_KEY
 const useSupabase = Boolean(supabaseUrl && supabaseKey)
 
 // Using static imports of both files would bundle both code paths; we use
 // top-level await on a dynamic import so the unused backend is tree-shaken.
-const impl = await (useSupabase
-  ? import('./storage-supabase.js')
-  : import('./storage-local.js'))
+const impl = await (useSupabase ? import('./storage-supabase.js') : import('./storage-local.js'))
 
 export const list = impl.list
 export const add = impl.add
