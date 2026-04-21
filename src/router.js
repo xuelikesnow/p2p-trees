@@ -12,9 +12,9 @@ export const router = createRouter({
   routes: [
     { path: '/', name: 'forest', component: Placeholder, meta: { title: 'the forest' } },
     { path: '/plant', name: 'plant', component: Placeholder, meta: { title: 'plant a tree' } },
-    { path: '/:pathMatch(.*)*', redirect: '/' }
+    { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
   scrollBehavior() {
     return { top: 0 }
-  }
+  },
 })

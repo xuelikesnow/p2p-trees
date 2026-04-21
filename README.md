@@ -1,7 +1,7 @@
 # do you think trees remember us?
 
 An interactive companion website to a set of riso prints — a Vue 3 SPA where visitors
-answer "*if you were a tree, what would you be and why?*" and watch their
+answer "_if you were a tree, what would you be and why?_" and watch their
 response take root in a shared forest.
 
 Each submission becomes a node in a [mycorrhizal network](https://en.wikipedia.org/wiki/Mycorrhizal_network).
@@ -14,4 +14,3 @@ them, making visible the quiet entanglements of how we describe ourselves.
 - **Vite** for dev/build
 - **d3-force** for the network physics
 - **Supabase** for shared persistence in the exhibition
-

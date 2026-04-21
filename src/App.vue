@@ -58,7 +58,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="shellRef" class="shell">
+  <div ref="shellRef" class="shell" :class="{ 'about-open': showAbout }">
     <!-- Full-bleed canvas. Sits beneath every other element. -->
     <Forest class="canvas" :width="canvasSize.w" :height="canvasSize.h" />
 
@@ -151,6 +151,20 @@ onBeforeUnmount(() => {
 .chrome--title {
   top: clamp(14px, 2.5vh, 28px);
   left: clamp(16px, 3vw, 40px);
+  transition:
+    opacity 0.25s ease,
+    filter 0.25s ease;
+}
+
+/* On narrow viewports the about card spans nearly the full viewport width,
+   so the title would peek out from underneath. Fade it out while the about
+   panel is open — it comes right back when the user closes the panel. */
+@media (max-width: 640px) {
+  .about-open .chrome--title {
+    opacity: 0;
+    filter: blur(2px);
+    pointer-events: none;
+  }
 }
 
 .title {
@@ -202,6 +216,9 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 12px;
+  /* Sit above the about card so CLOSE / "plant a tree" stay clickable even
+     when the card has been raised to cover the title on narrow viewports. */
+  z-index: 12;
 }
 
 .about-toggle {
@@ -246,7 +263,11 @@ onBeforeUnmount(() => {
 
 .about {
   position: absolute;
-  z-index: 9;
+  /* Above the title (z:10) so the card fully covers it on mobile, where the
+     card spans nearly the full viewport width and would otherwise collide
+     with the three-line title in the top-left. On desktop the card is a
+     narrow right-hand panel and won't overlap anything regardless. */
+  z-index: 11;
   top: clamp(68px, 9vh, 90px);
   right: clamp(16px, 3vw, 40px);
   width: min(420px, calc(100vw - 32px));

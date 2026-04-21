@@ -254,38 +254,128 @@ onMounted(() => {
 })
 
 // --- pan / zoom -------------------------------------------------------------
+//
+// We pan/zoom by animating the SVG's *viewBox* rather than a <g transform>.
+// That matters on iOS Safari: a transform on a <g> containing <foreignObject>
+// does not repaint the HTML inside the foreignObject reliably during touch
+// gestures, so nodes appear frozen while edges follow the transform. viewBox
+// animation reprojects the whole SVG, which repaints foreignObjects correctly
+// on every browser we care about.
+//
+// pan.{x,y} is the screen-pixel offset of the world origin inside the SVG.
+// A world point (x, y) appears at screen pixel (pan.x + zoom*x, pan.y + zoom*y).
+// That relationship matches the previous transform-based math, so everything
+// downstream (d3-force coordinates, link paths, node x/y) stays untouched.
 
 const pan = ref({ x: 0, y: 0 })
 const zoom = ref(1)
 const isPanning = ref(false)
 let panStart = null
 
-const viewTransform = computed(
-  () => `translate(${pan.value.x} ${pan.value.y}) scale(${zoom.value})`,
-)
+const viewBox = computed(() => {
+  const w = Math.max(1, props.width) / zoom.value
+  const h = Math.max(1, props.height) / zoom.value
+  const vx = -pan.value.x / zoom.value
+  const vy = -pan.value.y / zoom.value
+  return `${vx} ${vy} ${w} ${h}`
+})
 
-function onPointerDown(e) {
-  if (e.button !== 0) return
-  isPanning.value = true
-  panStart = { x: e.clientX - pan.value.x, y: e.clientY - pan.value.y }
-  e.currentTarget.setPointerCapture?.(e.pointerId)
+// Active pointers indexed by pointerId. Lets us differentiate single-finger
+// drag (pan) from two-finger gesture (pinch zoom) without needing the older
+// gesture* events, which are Safari-only.
+const pointers = new Map()
+// Snapshot captured at the moment a two-finger gesture begins, used to
+// compute zoom factor + keep the pinch midpoint stable in world space.
+let pinchStart = null
+
+function localPoint(e) {
+  const rect = svgRef.value?.getBoundingClientRect()
+  if (!rect) return { x: e.clientX, y: e.clientY }
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top }
 }
-function onPointerMove(e) {
-  if (!isPanning.value || !panStart) return
-  pan.value = { x: e.clientX - panStart.x, y: e.clientY - panStart.y }
-}
-function onPointerUp() {
+
+function beginPinch() {
+  if (pointers.size < 2) return
+  const [p1, p2] = [...pointers.values()]
+  const dx = p2.x - p1.x
+  const dy = p2.y - p1.y
+  pinchStart = {
+    distance: Math.max(1, Math.hypot(dx, dy)),
+    midX: (p1.x + p2.x) / 2,
+    midY: (p1.y + p2.y) / 2,
+    zoom: zoom.value,
+    pan: { ...pan.value },
+  }
+  // A running pan must not fight the pinch.
   isPanning.value = false
   panStart = null
 }
+
+function onPointerDown(e) {
+  // Accept touch + pen + mouse-left. Mouse-right/middle still get skipped.
+  if (e.pointerType === 'mouse' && e.button !== 0) return
+  const p = localPoint(e)
+  pointers.set(e.pointerId, p)
+  e.currentTarget.setPointerCapture?.(e.pointerId)
+
+  if (pointers.size >= 2) {
+    beginPinch()
+  } else {
+    isPanning.value = true
+    panStart = { x: p.x - pan.value.x, y: p.y - pan.value.y }
+  }
+}
+
+function onPointerMove(e) {
+  if (!pointers.has(e.pointerId)) return
+  const p = localPoint(e)
+  pointers.set(e.pointerId, p)
+
+  if (pointers.size >= 2 && pinchStart) {
+    const [p1, p2] = [...pointers.values()]
+    const dx = p2.x - p1.x
+    const dy = p2.y - p1.y
+    const dist = Math.hypot(dx, dy)
+    const scale = dist / pinchStart.distance
+    const nextZoom = Math.min(2.5, Math.max(0.25, pinchStart.zoom * scale))
+    const effK = nextZoom / pinchStart.zoom
+    // Keep the pinch anchor (the midpoint at the start of the gesture) fixed
+    // to the same world-space point it was over when the gesture began.
+    pan.value = {
+      x: pinchStart.midX - (pinchStart.midX - pinchStart.pan.x) * effK,
+      y: pinchStart.midY - (pinchStart.midY - pinchStart.pan.y) * effK,
+    }
+    zoom.value = nextZoom
+    return
+  }
+
+  if (isPanning.value && panStart) {
+    pan.value = { x: p.x - panStart.x, y: p.y - panStart.y }
+  }
+}
+
+function onPointerUp(e) {
+  pointers.delete(e.pointerId)
+  if (pointers.size < 2) pinchStart = null
+  if (pointers.size === 0) {
+    isPanning.value = false
+    panStart = null
+    return
+  }
+  // When lifting one finger of a pinch, hand control to the remaining
+  // finger so panning continues smoothly instead of snapping.
+  if (pointers.size === 1) {
+    const [p] = [...pointers.values()]
+    panStart = { x: p.x - pan.value.x, y: p.y - pan.value.y }
+    isPanning.value = true
+  }
+}
+
 function onWheel(e) {
   e.preventDefault()
   const delta = -e.deltaY * 0.0015
   const next = Math.min(2.5, Math.max(0.25, zoom.value * (1 + delta)))
-  // Zoom toward the cursor so panning+zooming feels coherent.
-  const rect = e.currentTarget.getBoundingClientRect()
-  const cx = e.clientX - rect.left
-  const cy = e.clientY - rect.top
+  const { x: cx, y: cy } = localPoint(e)
   const k = next / zoom.value
   pan.value = { x: cx - (cx - pan.value.x) * k, y: cy - (cy - pan.value.y) * k }
   zoom.value = next
@@ -363,7 +453,7 @@ const _tickDep = computed(() => tick.value)
     <svg
       ref="svgRef"
       class="forest"
-      :viewBox="`0 0 ${width} ${height}`"
+      :viewBox="viewBox"
       :width="width"
       :height="height"
       @pointerdown="onPointerDown"
@@ -380,7 +470,7 @@ const _tickDep = computed(() => tick.value)
         </filter>
       </defs>
 
-      <g :transform="viewTransform">
+      <g>
         <!-- Roots (links) render behind nodes -->
         <g class="roots" :data-tick="tick">
           <path
