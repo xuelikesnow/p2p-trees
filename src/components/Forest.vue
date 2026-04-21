@@ -27,6 +27,11 @@ const nodes = shallowRef([])
 const links = shallowRef([])
 const tick = ref(0)
 const svgRef = ref(null)
+// We render nodes as HTML in a sibling layer (not <foreignObject>) because
+// iOS Safari does not reproject foreignObject contents when the parent
+// <svg>'s viewBox changes. layerRef gives us a DOM root to query for node
+// sizing via measureNodes().
+const layerRef = ref(null)
 // True until the first storage callback fires. With the Supabase backend
 // that happens after the initial network fetch; with localStorage it flips
 // synchronously on mount. Drives the themed loading animation.
@@ -159,8 +164,8 @@ function rebuildGraph(responses) {
 // Read the real bounding box of every .response element and store a tight
 // collision radius on the corresponding node. Called after renders.
 function measureNodes() {
-  if (!svgRef.value || !simulation) return
-  const slots = svgRef.value.querySelectorAll('.node-slot')
+  if (!layerRef.value || !simulation) return
+  const slots = layerRef.value.querySelectorAll('.node-slot')
   const scale = zoom.value || 1
   let changed = false
   slots.forEach((slot) => {
@@ -279,6 +284,14 @@ const viewBox = computed(() => {
   const vy = -pan.value.y / zoom.value
   return `${vx} ${vy} ${w} ${h}`
 })
+
+// CSS transform applied to the HTML nodes layer. Produces the same world→
+// screen mapping as the SVG viewBox above: a world point (x, y) ends up at
+// screen pixel (pan.x + zoom*x, pan.y + zoom*y). transform-origin: 0 0 is
+// set in CSS so translate+scale compose predictably.
+const layerTransform = computed(
+  () => `translate(${pan.value.x}px, ${pan.value.y}px) scale(${zoom.value})`,
+)
 
 // Active pointers indexed by pointerId. Lets us differentiate single-finger
 // drag (pan) from two-finger gesture (pinch zoom) without needing the older
@@ -470,40 +483,50 @@ const _tickDep = computed(() => tick.value)
         </filter>
       </defs>
 
-      <g>
-        <!-- Roots (links) render behind nodes -->
-        <g class="roots" :data-tick="tick">
-          <path
-            v-for="link in links"
-            :key="(link.source.id ?? link.source) + '-' + (link.target.id ?? link.target)"
-            :d="linkPath(link)"
-            :class="['root', `root--${link.kind}`]"
-            :style="{
-              opacity: 0.4 + link.strength * 0.5,
-              stroke: linkStroke(link),
-            }"
-          />
-        </g>
-
-        <!-- Nodes (responses) -->
-        <g class="nodes" :data-tick="tick">
-          <foreignObject
-            v-for="node in nodes"
-            :key="node.id"
-            :data-node-id="node.id"
-            :x="(node.x ?? 0) - NODE_BOX_W / 2"
-            :y="(node.y ?? 0) - NODE_BOX_H / 2"
-            :width="NODE_BOX_W"
-            :height="NODE_BOX_H"
-            class="node-slot"
-          >
-            <div xmlns="http://www.w3.org/1999/xhtml" class="node-slot-inner">
-              <ResponseNode :response="node" />
-            </div>
-          </foreignObject>
-        </g>
+      <!-- Roots (links). Rendered in SVG so they benefit from feTurbulence
+           and stroke-dasharray; pan/zoom is applied via the SVG's viewBox
+           so paths reproject correctly on every browser. -->
+      <g class="roots" :data-tick="tick">
+        <path
+          v-for="link in links"
+          :key="(link.source.id ?? link.source) + '-' + (link.target.id ?? link.target)"
+          :d="linkPath(link)"
+          :class="['root', `root--${link.kind}`]"
+          :style="{
+            opacity: 0.4 + link.strength * 0.5,
+            stroke: linkStroke(link),
+          }"
+        />
       </g>
     </svg>
+
+    <!-- Nodes live in an HTML layer stacked over the SVG instead of inside
+         a <foreignObject>. iOS Safari does not reposition foreignObject
+         HTML content when the parent viewBox or transform changes during
+         touch gestures, which would leave nodes frozen while edges pan.
+         A CSS-transformed HTML layer sidesteps the bug entirely. The layer
+         itself has pointer-events: none so drag-to-pan passes through to
+         the SVG underneath. -->
+    <div
+      ref="layerRef"
+      class="nodes-layer"
+      :data-tick="tick"
+      :style="{ transform: layerTransform }"
+    >
+      <div
+        v-for="node in nodes"
+        :key="node.id"
+        :data-node-id="node.id"
+        class="node-slot"
+        :style="{
+          transform: `translate(${(node.x ?? 0) - NODE_BOX_W / 2}px, ${(node.y ?? 0) - NODE_BOX_H / 2}px)`,
+          width: NODE_BOX_W + 'px',
+          height: NODE_BOX_H + 'px',
+        }"
+      >
+        <ResponseNode :response="node" />
+      </div>
+    </div>
 
     <div class="forest-controls">
       <button type="button" @click="recenter">recenter</button>
@@ -587,15 +610,26 @@ const _tickDep = computed(() => tick.value)
   stroke-dasharray: 4 4 1 4;
 }
 
-.node-slot {
-  overflow: visible;
+/* HTML nodes layer. Stacked above the SVG and pans/zooms via CSS transform.
+   pointer-events: none so the SVG below still receives drag-to-pan; we don't
+   have per-node interactions to preserve. transform-origin: 0 0 keeps the
+   translate+scale math aligned with the SVG viewBox math. */
+.nodes-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transform-origin: 0 0;
+  will-change: transform;
 }
-.node-slot-inner {
-  width: 100%;
-  height: 100%;
+.node-slot {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: flex;
   align-items: center;
   justify-content: center;
+  transform-origin: 0 0;
+  will-change: transform;
 }
 
 .forest-controls {
