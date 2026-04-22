@@ -44,7 +44,7 @@ async function onSubmit() {
 <template>
   <form class="form" @submit.prevent="onSubmit">
     <h2 class="prompt">
-      <span class="prompt-line prompt-line--bold">if I were a tree...</span>
+      <span class="prompt-line prompt-line--bold">if i were a tree...</span>
       <!-- <span class="prompt-line prompt-line--bold">what would you be</span> -->
       <span class="prompt-line">what would i be, and why?</span>
     </h2>
@@ -54,7 +54,7 @@ async function onSubmit() {
       <input
         v-model="species"
         type="text"
-        placeholder="pine, magnolia, the one outside my house, whatever grows outside"
+        placeholder="pine, magnolia, the one outside my house... whatever grows outside"
         maxlength="100"
         required
         autocomplete="off"

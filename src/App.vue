@@ -95,14 +95,19 @@ onBeforeUnmount(() => {
     <transition name="fade">
       <section v-if="showAbout" class="about" role="complementary">
         <p>
-          <em>Do You Think Trees Remember Us?</em> began with handwritten answers to one question:
+          <em>Do You Think Trees Remember Us?</em> began with 10 handwritten answers to one
+          question:
           <strong>if you were a tree, what would you be and why?</strong>
         </p>
         <p>
-          This forest gathers those answers online. Each response is a node; roots appear between
-          responses that share a species or a meaningful word, making visible the quiet
-          entanglements of how we describe ourselves. Drag to wander, scroll to zoom in and out of
-          the canopy.
+          This forest gathers those answers online. Each response becomes a node in a
+          <a href="https://en.wikipedia.org/wiki/Mycorrhizal_network">mycorrhizal network</a>; roots
+          appear between responses that share a species or a meaningful word, making visible the
+          quiet entanglements of how we understand ourselves:
+          <i
+            >how we wish to be seen, how we relate to others, and how we imagine our place in the
+            world</i
+          >. Drag to wander, scroll to zoom in and out of the canopy.
         </p>
         <p class="fine">Inspired by "Wood Wide Webs" by James Bridle.</p>
       </section>
@@ -119,6 +124,14 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+a {
+  color: var(--ink-green);
+}
+
+i {
+  color: var(--ink-green);
+}
+
 .shell {
   position: relative;
   width: 100%;
