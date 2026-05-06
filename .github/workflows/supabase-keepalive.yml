@@ -1,0 +1,41 @@
+name: supabase keepalive
+
+# Hits the Supabase REST API on a schedule so the project never crosses the
+# 7-day "no activity" threshold that would auto-pause it on the free tier.
+# Any authenticated request counts as activity; we just do a cheap select.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions → New
+# repository secret):
+#   - SUPABASE_URL              (e.g. https://xxxxx.supabase.co)
+#   - SUPABASE_PUBLISHABLE_KEY  (the sb_publishable_... or anon key)
+
+on:
+  schedule:
+    # Once a day at 14:17 UTC. Odd minute reduces the chance of being skipped
+    # during GitHub's high-load top-of-hour windows. Daily is plenty — we
+    # just need at least one request every 7 days.
+    - cron: '17 14 * * *'
+  workflow_dispatch: # also lets you trigger it manually from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase
+        env:
+          URL: ${{ secrets.SUPABASE_URL }}
+          KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${URL}" ] || [ -z "${KEY}" ]; then
+            echo "::error::SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY secret is not set"
+            exit 1
+          fi
+          # -f makes curl exit non-zero on HTTP errors so the job fails loudly
+          # if the project is down or the key is bad. -s for quiet output,
+          # -S to still show errors when -s is used.
+          response=$(curl -fsS \
+            -H "apikey: ${KEY}" \
+            -H "Authorization: Bearer ${KEY}" \
+            "${URL}/rest/v1/responses?select=id&limit=1")
+          echo "Supabase responded: ${response}"
